@@ -4,6 +4,59 @@
 
 ---
 
+## What Is DFT-D3 Dispersion? (Quick Answer)
+
+**In one sentence:** DFT-D3 is a mathematical correction added on top of a potential's energy to account for van der Waals attraction — the weak, long-range force between atoms/molecules that arises purely from quantum electron fluctuations, which standard DFT functionals (like PBE) and ML potentials trained on them fail to capture.
+
+### Why it's needed
+
+MACE-OMAT computes energy by approximating the **PBE** potential energy surface. PBE is a **local** functional — it looks at electron density point-by-point in space. When two objects (like a CrCl₃ flake and a NbSe₂ surface) are separated by a gap where their electron clouds don't overlap, PBE sees **zero interaction** between them.
+
+But physically, there IS an attraction there — **London dispersion** — caused by correlated quantum fluctuations of electron density between the two bodies. This is completely invisible to any local functional.
+
+**D3 is Grimme's fix**: instead of trying to redesign the functional (hard), just add the missing energy back in as a separate, analytical correction:
+
+$$E_\text{total} = E_\text{DFT (or ML)} + E_\text{disp}$$
+
+### What it physically computes
+
+$$E_\text{disp} = -\sum_{\text{pairs}} \left( s_6 \frac{C_6^{ij}}{r_{ij}^6} + s_8 \frac{C_8^{ij}}{r_{ij}^8} \right) f_\text{damp}(r_{ij})$$
+
+For every pair of atoms in the system:
+
+| Piece | What it represents |
+|---|---|
+| $C_6^{ij}/r^6$ | Dipole–dipole dispersion — the dominant long-range attraction |
+| $C_8^{ij}/r^8$ | Dipole–quadrupole correction — a smaller additional term |
+| $C_6^{ij}$ | How polarizable this specific atom pair is (depends on local bonding environment via coordination number) |
+| $s_6, s_8$ | Scaling factors — how much of this dispersion the base functional (PBE) is already missing |
+| $f_\text{damp}(r)$ | Smoothly turns D3 off at short range so it doesn't interfere where MACE already handles bonding correctly |
+
+### What it is NOT
+
+- **Not a standalone potential** — it can't run a simulation by itself. It's an add-on.
+- **Not electrostatics** — it has nothing to do with charges or ionic attraction.
+- **Not chemisorption** — no bonds form, no electrons are shared. It's purely physisorption-type attraction.
+- **Not arbitrary** — every number in it ($s_6$, $s_8$, damping parameters) is fitted from real quantum chemistry reference data, specific to the chosen functional (PBE) and damping style (BJ).
+
+### In the LAMMPS script
+
+```lammps
+pair_style hybrid/overlay mace no_domain_decomposition dispersion/d3 bj pbe 30.0 20.0
+pair_coeff * * mace mace-omat-0-small.model-lammps.pt Cl Cr Nb Se
+pair_coeff * * dispersion/d3 Cl Cr Nb Se
+```
+
+`dispersion/d3` here means: *"run this correction alongside MACE, add its energy to MACE's energy, using BJ damping and PBE scaling factors, summing over all pairs within 30 Å and computing coordination numbers within 20 Å."*
+
+### Why it mattered for this simulation
+
+Without it: MACE alone saw essentially zero attraction across the CrCl₃–NbSe₂ interface (pure vdW gap, no bonding, no electrostatics) → CrCl₃ didn't adsorb.
+
+With it: the correct long-range attraction is restored → CrCl₃ physisorbs on the surface → nucleation can proceed, matching real PVTD physics.
+
+---
+
 ## Chapter 1 — The Fundamental Problem
 
 We are simulating **CrCl₃ on a NbSe₂ surface**.
